@@ -1,4 +1,4 @@
-import pyodbc
+import mysql.connector
 import uvicorn
 import os
 from fastapi import FastAPI
@@ -9,7 +9,14 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-connection_string = os.getenv("CONNECTION_STRING")
+# MySQL connection details
+db_config = {
+    "host": os.getenv("DB_HOST", "todo_mysql"),
+    "user": os.getenv("DB_USER", "todouser"),
+    "password": os.getenv("DB_PASSWORD", "todopass"),
+    "database": os.getenv("DB_NAME", "tododb"),
+    "port": int(os.getenv("DB_PORT", "3306"))
+}
 
 app = FastAPI()
 
@@ -31,78 +38,102 @@ class Task(BaseModel):
 @app.get("/api")
 def create_tasks_table():
     try:
-        conn = pyodbc.connect(connection_string)
+        conn = mysql.connector.connect(**db_config)
         cursor = conn.cursor()
         cursor.execute("""
-            CREATE TABLE Tasks (
-                ID int NOT NULL PRIMARY KEY IDENTITY,
-                Title varchar(255),
-                Description text
-            );
+            CREATE TABLE IF NOT EXISTS todos (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                title VARCHAR(255) NOT NULL,
+                description TEXT,
+                status ENUM('pending', 'completed') DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            )
         """)
-        conn.commit()        
+        conn.commit()
+        cursor.close()
+        conn.close()
     except Exception as e:
-        print(e)
-    return "Table Created... Tasks API Ready"
+        print(f"Error creating table: {e}")
+    return "Table Created... Todos API Ready"
 
 # List all tasks
 @app.get("/api/tasks")
 def get_tasks():
     tasks = []
-    with pyodbc.connect(connection_string) as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM Tasks")
+    try:
+        conn = mysql.connector.connect(**db_config)
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM todos")
         for row in cursor.fetchall():
-            task = {
-                "ID": row.ID,
-                "Title": row.Title,
-                "Description": row.Description
-            }
-            tasks.append(task)
+            tasks.append(row)
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        print(f"Error fetching tasks: {e}")
     return tasks
 
 # Retrieve a single task by ID
 @app.get("/api/tasks/{task_id}")
 def get_task(task_id: int):
-    with pyodbc.connect(connection_string) as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM Tasks WHERE ID = ?", task_id)
+    try:
+        conn = mysql.connector.connect(**db_config)
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM todos WHERE id = %s", (task_id,))
         row = cursor.fetchone()
+        cursor.close()
+        conn.close()
         if row:
-            task = {
-                "ID": row.ID,
-                "Title": row.Title,
-                "Description": row.Description
-            }
-            return task
+            return row
         return {"message": "Task not found"}
+    except Exception as e:
+        print(f"Error fetching task: {e}")
+        return {"message": "Error fetching task"}
 
 # Create a new task
 @app.post("/api/tasks")
 def create_task(task: Task):
-    with pyodbc.connect(connection_string) as conn:
+    try:
+        conn = mysql.connector.connect(**db_config)
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO Tasks (Title, Description) VALUES (?, ?)", task.title, task.description)
+        cursor.execute("INSERT INTO todos (title, description) VALUES (%s, %s)", (task.title, task.description))
         conn.commit()
-    return task
+        cursor.close()
+        conn.close()
+        return {"message": "Task created", "task": task}
+    except Exception as e:
+        print(f"Error creating task: {e}")
+        return {"message": "Error creating task"}
 
 # Update an existing task by ID
-@app.put("/tasks/{task_id}")
+@app.put("/api/tasks/{task_id}")
 def update_task(task_id: int, updated_task: Task):
-    with pyodbc.connect(connection_string) as conn:
+    try:
+        conn = mysql.connector.connect(**db_config)
         cursor = conn.cursor()
-        cursor.execute("UPDATE Tasks SET Title = ?, Description = ? WHERE ID = ?", updated_task.title, updated_task.description, task_id)
+        cursor.execute("UPDATE todos SET title = %s, description = %s WHERE id = %s", (updated_task.title, updated_task.description, task_id))
         conn.commit()
+        cursor.close()
+        conn.close()
         return {"message": "Task updated"}
+    except Exception as e:
+        print(f"Error updating task: {e}")
+        return {"message": "Error updating task"}
 
 # Delete a task by ID
 @app.delete("/api/tasks/{task_id}")
 def delete_task(task_id: int):
-    with pyodbc.connect(connection_string) as conn:
+    try:
+        conn = mysql.connector.connect(**db_config)
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM Tasks WHERE ID = ?", task_id)
+        cursor.execute("DELETE FROM todos WHERE id = %s", (task_id,))
         conn.commit()
+        cursor.close()
+        conn.close()
         return {"message": "Task deleted"}
+    except Exception as e:
+        print(f"Error deleting task: {e}")
+        return {"message": "Error deleting task"}
 
 if __name__ == "__main__":
     create_tasks_table()

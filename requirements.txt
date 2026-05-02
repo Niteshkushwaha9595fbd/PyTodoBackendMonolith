@@ -1,6 +1,5 @@
-pyodbc
+mysql-connector-python
 fastapi
 uvicorn[standard]
 pydantic
-azure-identity
 python-dotenv
